@@ -1,0 +1,178 @@
+library(shiny)
+library(ggplot2)
+library(plotly)
+
+# 定义UI
+ui <- fluidPage(
+  titlePanel("学生抑郁风险计算器"),
+
+  sidebarLayout(
+    sidebarPanel(
+      width = 3,
+
+      h4("基本信息"),
+      numericInput("age", "年龄", 22, min = 16, max = 40),
+
+      selectInput(
+        "sleep",
+        "睡眠时长",
+        choices = c(
+          "7-8 hours",
+          "5-6 hours",
+          "Less than 5 hours",
+          "More than 8 hours"
+        )
+      ),
+
+      h4("学习与压力"),
+      sliderInput("academic_pressure", "学业压力 (1-5)", 1, 5, 3),
+      sliderInput("study_satisfaction", "学习满意度 (1-5)", 1, 5, 3),
+      numericInput("work_hours", "学习/工作时长 (小时/天)", 6, 0, 16),
+
+      h4("其他因素"),
+      numericInput("cgpa", "CGPA", 3.0, 0, 4, step = 0.1),
+      sliderInput("financial_stress", "经济压力 (1-5)", 1, 5, 3),
+      checkboxInput("family_history", "家族精神病史", FALSE),
+
+      br(),
+      actionButton("calc", "计算抑郁风险", class = "btn-danger btn-block")
+    ),
+
+    mainPanel(
+      fluidRow(
+        column(
+          4,
+          div(class = "well",
+              h4("抑郁概率"),
+              h2(textOutput("risk_prob"), style = "color:#D62828;"),
+              p("Logistic Regression 预测")
+          )
+        ),
+        column(
+          4,
+          div(class = "well",
+              h4("风险等级"),
+              h2(textOutput("risk_level"))
+          )
+        ),
+        column(
+          4,
+          div(class = "well",
+              h4("风险解释"),
+              verbatimTextOutput("risk_explain")
+          )
+        )
+      ),
+
+      br(),
+      h4("变量贡献（log-odds）"),
+      plotOutput("coef_plot", height = "400px")
+    )
+  )
+)
+
+
+# Server
+
+server <- function(input, output, session) {
+
+  # ---- Logistic Regression 系数 ----
+  intercept <- -2.437387 
+  age_coef <- -0.105696
+  academic_pressure_coef <- 0.844412
+  study_satisfaction_coef <- -0.232714
+  work_hours_coef <- 0.120293
+  cgpa_coef <- 0.055520
+  financial_stress_coef <- 0.567434
+  family_history_coef <- 0.241958
+
+  sleep_effect <- reactive({
+    switch(
+      input$sleep,
+      "7-8 hours" = 0,
+      "5-6 hours" =  -0.085361,
+      "Less than 5 hours" = 0.298977,
+      "More than 8 hours" = -0.375977
+    )
+  })
+
+  # ---- 预测函数 ----
+  logit_value <- reactive({
+    intercept +
+      age_coef * input$age +
+      academic_pressure_coef * input$academic_pressure +
+      study_satisfaction_coef * input$study_satisfaction +
+      work_hours_coef * input$work_hours +
+      cgpa_coef * input$cgpa +
+      financial_stress_coef * input$financial_stress +
+      family_history_coef * as.numeric(input$family_history) +
+      sleep_effect()
+  })
+
+  depression_prob <- reactive({
+    1 / (1 + exp(-logit_value()))
+  })
+
+  # ---- 输出 ----
+  output$risk_prob <- renderText({
+    paste0(round(depression_prob() * 100, 1), "%")
+  })
+
+  output$risk_level <- renderText({
+    p <- depression_prob()
+    if (p < 0.3) "低风险"
+    else if (p < 0.6) "中风险"
+    else "高风险"
+  })
+
+  output$risk_explain <- renderPrint({
+    cat("线性预测值 (log-odds):", round(logit_value(), 3), "\n\n")
+
+    if (depression_prob() > 0.6) {
+      cat("⚠️ 高风险：\n")
+      cat("- 学业/经济压力较高\n")
+      cat("- 睡眠不足或家族史影响明显\n")
+    } else if (depression_prob() > 0.3) {
+      cat("⚠️ 中风险：\n")
+      cat("- 建议关注压力与作息\n")
+    } else {
+      cat("低风险：\n")
+      cat("- 当前状态相对稳定\n")
+    }
+  })
+
+  # ---- 贡献条形图 ----
+  output$coef_plot <- renderPlot({
+    df <- data.frame(
+      Variable = c(
+        "Age", "Academic Pressure", "Study Satisfaction",
+        "Work Hours", "CGPA", "Financial Stress",
+        "Family History", "Sleep Duration"
+      ),
+      Contribution = c(
+        age_coef * input$age,
+        academic_pressure_coef * input$academic_pressure,
+        study_satisfaction_coef * input$study_satisfaction,
+        work_hours_coef * input$work_hours,
+        cgpa_coef * input$cgpa,
+        financial_stress_coef * input$financial_stress,
+        family_history_coef * as.numeric(input$family_history),
+        sleep_effect()
+      )
+    )
+
+    ggplot(df, aes(x = reorder(Variable, Contribution), y = Contribution)) +
+      geom_bar(stat = "identity",
+               fill = ifelse(df$Contribution > 0, "#D62828", "#2A9D8F")) +
+      coord_flip() +
+      labs(
+        title = "各因素对抑郁风险的贡献（log-odds）",
+        x = "",
+        y = "贡献值"
+      ) +
+      theme_minimal()
+  })
+}
+
+# 运行应用
+shinyApp(ui = ui, server = server)
