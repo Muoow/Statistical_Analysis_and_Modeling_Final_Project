@@ -1,0 +1,53 @@
+library(forecast)
+library(tseries)
+library(zoo)
+# 数据导入&预处理
+data <- read.csv("monthly-sunspots.csv")
+head(data)
+summary(data)
+
+data$Sunspots[data$Sunspots == 0] <- NA
+data$Sunspots <- na.approx(data$Sunspots)
+summary(data)
+# 数据可视化
+ts <- ts(
+  data = data$Sunspots,
+  frequency = 12,
+  start = c(1749, 1)
+)
+plot(ts)
+
+dp <- decompose(ts)
+plot(dp)
+tsdisplay(ts, lag.max = 30)
+
+# 差分
+ts_1 <- diff(ts, 1)
+plot(ts_1)
+
+# 差分后检验
+dp_1 <- decompose(ts_1)
+plot(dp_1)
+adf.test(ts_1)
+
+dp_1 <- decompose(ts_1)
+plot(dp_1)
+tsdisplay(ts_1, lag.max = 30)
+
+
+model <- auto.arima(
+  ts
+)
+checkresiduals(model)
+
+forecast_result <- forecast(object = model, h = 6)
+plot(forecast_result)
+
+model1 <- Arima(ts, order = c(2,1,1))
+model2 <- Arima(ts, order = c(2,1,2))
+model3 <- Arima(ts, order = c(3,1,2))
+
+# 对比AIC
+cat("ARIMA(2,1,1) AIC:", AIC(model1), "\n")
+cat("ARIMA(2,1,2) AIC:", AIC(model2), "\n")
+cat("ARIMA(3,1,2) AIC:", AIC(model3), "\n")
