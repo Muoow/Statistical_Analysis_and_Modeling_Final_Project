@@ -1,0 +1,317 @@
+```{r normal distribution}
+
+# ============================================================
+# 学生抑郁数据集分析
+# ============================================================
+
+# 加载必要的包
+library(ggplot2)
+library(corrplot)
+library(pROC)
+library(MASS)
+library(gridExtra)
+library(reshape2)
+library(dplyr)
+
+# ============================================================
+# 1. 数据读取和预处理
+# ============================================================
+
+# 读取数据
+data <- read.csv("student_depression_dataset.csv")
+
+# 处理缺失值
+data$Financial.Stress[data$Financial.Stress == "?"] <- NA
+data$Financial.Stress <- as.numeric(data$Financial.Stress)
+data$Work.Study.Hours <- as.numeric(data$Work.Study.Hours)
+data$CGPA <- as.numeric(data$CGPA)
+
+# 因变量处理
+data$Depression <- factor(data$Depression, levels = c(0, 1))
+
+# Sleep Duration 处理
+data$Sleep.Duration <- factor(
+  data$Sleep.Duration,
+  levels = c("'7-8 hours'", "'5-6 hours'", "'Less than 5 hours'", "'More than 8 hours'")
+)
+
+# 检查缺失值
+cat("各列缺失值数量：\n")
+print(colSums(is.na(data)))
+
+# 删除缺失值
+data <- na.omit(data)
+cat("\n清洗后数据量:", nrow(data), "行\n\n")
+
+# ============================================================
+# 2. 探索性数据分析
+# ============================================================
+
+# 2.1 相关性热力图
+num_data <- data[, sapply(data, is.numeric)]
+cor_matrix <- cor(num_data, use = "complete.obs")
+
+png("correlation_heatmap.png", width = 1000, height = 800)
+corrplot(cor_matrix, 
+         method = "color",
+         type = "upper",
+         addCoef.col = "black",
+         number.cex = 0.8,
+         number.digits = 2,
+         tl.cex = 0.9,
+         cl.cex = 0.9,
+         tl.col = "black",
+         diag = TRUE,
+         title = "Correlation Matrix of Numeric Variables",
+         mar = c(0, 0, 2, 0))
+dev.off()
+
+# 2.2 抑郁状态分布
+p1 <- ggplot(data, aes(x = Depression, fill = Depression)) +
+  geom_bar(width = 0.6) +
+  scale_fill_manual(values = c("0" = "#4CAF50", "1" = "#F44336"),
+                    labels = c("Non-Depressed", "Depressed")) +
+  labs(title = "Depression Status Distribution",
+       x = "Depression Status",
+       y = "Count") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# 2.3 学习时间与抑郁关系
+p2 <- ggplot(data, aes(x = Work.Study.Hours, fill = Depression)) +
+  geom_histogram(binwidth = 1, position = "dodge", boundary = 0, closed = "left") +
+  scale_fill_manual(values = c("0" = "#4CAF50", "1" = "#F44336"),
+                    labels = c("Non-Depressed", "Depressed")) +
+  labs(title = "Study Hours Distribution by Depression Status",
+       x = "Study/Work Hours",
+       y = "Number of Students",
+       fill = "Status") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# 2.4 睡眠时长与抑郁关系
+p3 <- ggplot(data, aes(x = Sleep.Duration, fill = Depression)) +
+  geom_bar(position = "dodge") +
+  scale_fill_manual(values = c("0" = "#4CAF50", "1" = "#F44336"),
+                    labels = c("Non-Depressed", "Depressed")) +
+  labs(title = "Sleep Duration vs Depression",
+       x = "Sleep Duration",
+       y = "Count",
+       fill = "Status") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+        axis.text.x = element_text(angle = 15, hjust = 1))
+
+# 2.5 学术压力分布
+p4 <- ggplot(data, aes(x = Academic.Pressure, fill = Depression)) +
+  geom_histogram(binwidth = 0.5, position = "dodge", alpha = 0.7) +
+  scale_fill_manual(values = c("0" = "#4CAF50", "1" = "#F44336"),
+                    labels = c("Non-Depressed", "Depressed")) +
+  labs(title = "Academic Pressure Distribution",
+       x = "Academic Pressure (1-5)",
+       y = "Count",
+       fill = "Status") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# 2.6 CGPA 与抑郁关系
+p5 <- ggplot(data, aes(x = Depression, y = CGPA, fill = Depression)) +
+  geom_boxplot(alpha = 0.7) +
+  scale_fill_manual(values = c("0" = "#4CAF50", "1" = "#F44336"),
+                    labels = c("Non-Depressed", "Depressed")) +
+  labs(title = "CGPA Distribution by Depression Status",
+       x = "Depression Status",
+       y = "CGPA") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# 2.7 财务压力分布
+p6 <- ggplot(data, aes(x = Financial.Stress, fill = Depression)) +
+  geom_histogram(binwidth = 0.5, position = "dodge", alpha = 0.7) +
+  scale_fill_manual(values = c("0" = "#4CAF50", "1" = "#F44336"),
+                    labels = c("Non-Depressed", "Depressed")) +
+  labs(title = "Financial Stress Distribution",
+       x = "Financial Stress (1-5)",
+       y = "Count",
+       fill = "Status") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+# 保存组合图
+png("exploratory_analysis.png", width = 1400, height = 1000)
+grid.arrange(p1, p2, p3, p4, p5, p6, ncol = 3)
+dev.off()
+```
+
+
+```{r LR}
+# ============================================================
+# 3. Logistic Regression 模型
+# ============================================================
+
+cat("\n========== LOGISTIC REGRESSION ==========\n")
+
+model_lr <- glm(
+  Depression ~ Age + Academic.Pressure + Study.Satisfaction + 
+               Sleep.Duration + Dietary.Habits + Work.Study.Hours + 
+               CGPA + Family.History.of.Mental.Illness + Financial.Stress,
+  data = data,
+  family = binomial
+)
+
+print(summary(model_lr))
+
+# Odds Ratios
+cat("\n--- Odds Ratios ---\n")
+odds_ratios <- exp(coef(model_lr))
+print(round(odds_ratios, 3))
+
+# 可视化 Odds Ratios (去除 HabitOthers)
+or_df <- data.frame(
+  Variable = names(odds_ratios)[-1],
+  OR = odds_ratios[-1]
+)
+# 过滤掉包含 "HabitOthers" 的行
+or_df <- or_df[!grepl("HabitsOthers", or_df$Variable), ]
+or_df <- or_df[order(or_df$OR, decreasing = TRUE), ]
+
+p_or <- ggplot(or_df, aes(x = reorder(Variable, OR), y = OR)) +
+  geom_col(fill = "#2196F3", alpha = 0.8) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +
+  coord_flip() +
+  labs(title = "Odds Ratios from Logistic Regression",
+       x = "Variables",
+       y = "Odds Ratio") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+ggsave("odds_ratios.png", p_or, width = 10, height = 6)
+
+# 预测和评估
+prob <- predict(model_lr, type = "response")
+pred_class <- factor(ifelse(prob >= 0.5, 1, 0), levels = c(0, 1))
+actual <- factor(data$Depression, levels = c(0, 1))
+
+# ROC 曲线
+roc_obj <- roc(data$Depression, prob, quiet = TRUE)
+
+png("roc_curve.png", width = 800, height = 800)
+plot(roc_obj, 
+     col = "#2196F3", 
+     lwd = 3,
+     main = paste0("ROC Curve (AUC = ", round(auc(roc_obj), 3), ")"),
+     cex.main = 1.5)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+dev.off()
+
+cat("\n--- AUC ---\n")
+print(auc(roc_obj))
+
+# 混淆矩阵
+conf_mat <- table(Predicted = pred_class, Actual = actual)
+cat("\n--- Confusion Matrix ---\n")
+print(conf_mat)
+
+# 性能指标
+accuracy <- sum(diag(conf_mat)) / sum(conf_mat)
+precision <- conf_mat["1", "1"] / sum(conf_mat["1", ])
+recall <- conf_mat["1", "1"] / sum(conf_mat[, "1"])
+f1 <- 2 * (precision * recall) / (precision + recall)
+
+cat("\n--- Performance Metrics ---\n")
+cat("Accuracy: ", round(accuracy, 4), "\n")
+cat("Precision:", round(precision, 4), "\n")
+cat("Recall:   ", round(recall, 4), "\n")
+cat("F1 Score: ", round(f1, 4), "\n")
+
+# ============================================================
+# 4. Linear Discriminant Analysis (LDA)
+# ============================================================
+
+cat("\n========== LINEAR DISCRIMINANT ANALYSIS ==========\n")
+
+lda_model <- lda(Depression ~ Age + Academic.Pressure + Financial.Stress, 
+                 data = data)
+print(lda_model)
+
+predictions_lda <- predict(lda_model)
+conf_mat_lda <- table(Predicted = predictions_lda$class, Actual = data$Depression)
+
+cat("\n--- LDA Confusion Matrix ---\n")
+print(conf_mat_lda)
+
+accuracy_lda <- sum(diag(conf_mat_lda)) / sum(conf_mat_lda)
+cat("\nLDA Accuracy:", round(accuracy_lda, 4), "\n")
+
+# LDA 可视化
+lda_df <- data.frame(
+  LD1 = predictions_lda$x[, 1],
+  Depression = data$Depression
+)
+
+p_lda <- ggplot(lda_df, aes(x = LD1, fill = Depression)) +
+  geom_density(alpha = 0.6) +
+  scale_fill_manual(values = c("0" = "#4CAF50", "1" = "#F44336"),
+                    labels = c("Non-Depressed", "Depressed")) +
+  labs(title = "LDA Discriminant Function Distribution",
+       x = "Linear Discriminant (LD1)",
+       y = "Density") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold"))
+
+ggsave("lda_distribution.png", p_lda, width = 10, height = 6)
+
+# ============================================================
+# 5. Linear Regression 模型
+# ============================================================
+
+cat("\n========== LINEAR REGRESSION: Academic Pressure ==========\n")
+
+model_ap <- lm(
+  Academic.Pressure ~ CGPA + Study.Satisfaction + Work.Study.Hours + 
+                      Financial.Stress + Family.History.of.Mental.Illness + 
+                      Depression + Sleep.Duration, 
+  data = data
+)
+print(summary(model_ap))
+
+cat("\n========== LINEAR REGRESSION: CGPA ==========\n")
+
+model_cgpa <- lm(
+  CGPA ~ Age + Academic.Pressure + Study.Satisfaction + Sleep.Duration + 
+         Dietary.Habits + Work.Study.Hours + Depression + Financial.Stress,
+  data = data
+)
+print(summary(model_cgpa))
+
+# 残差图
+png("residual_plots.png", width = 1200, height = 600)
+par(mfrow = c(1, 2))
+
+# Academic Pressure 模型残差
+plot(model_ap$fitted.values, model_ap$residuals,
+     main = "Residuals: Academic Pressure Model",
+     xlab = "Fitted Values", ylab = "Residuals",
+     pch = 19, col = rgb(0, 0, 1, 0.3))
+abline(h = 0, col = "red", lwd = 2)
+
+# CGPA 模型残差
+plot(model_cgpa$fitted.values, model_cgpa$residuals,
+     main = "Residuals: CGPA Model",
+     xlab = "Fitted Values", ylab = "Residuals",
+     pch = 19, col = rgb(0, 0, 1, 0.3))
+abline(h = 0, col = "red", lwd = 2)
+
+dev.off()
+
+cat("\n========== 分析完成！所有图表已保存 ==========\n")
+cat("生成的文件:\n")
+cat("- correlation_heatmap.png\n")
+cat("- exploratory_analysis.png\n")
+cat("- odds_ratios.png\n")
+cat("- roc_curve.png\n")
+cat("- lda_distribution.png\n")
+cat("- residual_plots.png\n")
+
+
+```
